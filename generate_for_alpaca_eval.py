@@ -4,12 +4,14 @@ from fire import Fire
 from functools import partial
 from typing import List
 from loguru import logger
+from path import Path
 
 from utils import (
     generate_together,
     generate_openai,
     generate_with_references,
-    DEBUG,
+    generate_response,
+    DEBUG, save_checkpoint_json,
 )
 
 
@@ -21,7 +23,7 @@ def process_fn(
     max_tokens=2048,
     rounds=1,
 ):
-
+# 生成MoA output
     messages = [{"role": "user", "content": item["instruction"]}]
 
     references = item.get("references", [])
@@ -47,6 +49,7 @@ def process_fn(
                     references=prev_references,
                     temperature=temperature,
                     max_tokens=max_tokens,
+                    generate_fn=generate_response,
                 )
 
                 if reference is not None:
@@ -60,12 +63,13 @@ def process_fn(
                 references = []
 
     output = generate_with_references(
-        model=model,
-        messages=messages,
-        references=references,
+        model=model,  # aggregator
+        messages=messages, # prompt for aggregator
+        references=references, # other reference model's output
+        generate_fn=generate_response,
     )
-
-    return {"output": output, "generator": model + "-together"}
+    # 这里移除了model后缀“-together”
+    return {"output": output, "generator": model}
 
 
 def main(
@@ -77,6 +81,7 @@ def main(
     max_tokens: int = 2048,
     rounds: int = 1,
     num_proc: int = 16,
+    batch_size: int = 50,
 ):
 
     if reference_paths is None:
@@ -89,9 +94,11 @@ def main(
     else:
         reference_models = reference_models.split(",")
 
-    eval_set = datasets.load_dataset(
+    eval_set = (datasets.load_dataset(
         "tatsu-lab/alpaca_eval", "alpaca_eval_gpt4_baseline", trust_remote_code=True
-    )["eval"]
+    )["eval"])
+    # .select(range(1))
+    # 这里只保留前5个样本，方便调试
     eval_set = eval_set.remove_columns(["output", "generator"])
 
     if len(reference_paths):
@@ -125,29 +132,58 @@ def main(
 
     logger.info(f"Start.")
 
-    eval_set = eval_set.map(
-        partial(
-            process_fn,
-            model=model,
-            reference_models=reference_models,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            rounds=rounds,
-        ),
-        batched=False,
-        num_proc=num_proc,
-    )
 
-    logger.info(f"Saving outputs to {output_path}.")
+    all_results = []
+    for i in range(0, len(eval_set), batch_size):
+        batch_indices = range(i, min(i + batch_size, len(eval_set)))
 
-    try:
-        eval_set = eval_set.remove_columns(f"references")
-    except Exception as e:
-        pass
+        try:
+            batch = eval_set.select(batch_indices)
+            processed_batch = batch.map(
+                partial(
+                    process_fn,
+                    model=model,
+                    reference_models=reference_models,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    rounds=rounds,
+                ),
+                batched=False,
+                num_proc=num_proc,
+            )
+            all_results.extend(processed_batch)
 
-    with open(output_path, "w") as f:
+            ckpath = save_checkpoint_json(all_results, Path(output_path)/model/"checkpoints", i//batch_size)
+            logger.info(f"Batch {i//batch_size} saved to {ckpath}.")
+        except Exception as e:
+            logger.error(f"Batch {i//batch_size}, batch_indices: {batch_indices}, failed: {e}")
+            print(f"Skipping batch {i // batch_size}, batch_indices: {batch_indices}, continuing...")
+            continue
 
-        json.dump(list(eval_set), f, indent=2)
+
+    # eval_set = eval_set.map(
+    #     partial(
+    #         process_fn,
+    #         model=model,
+    #         reference_models=reference_models,
+    #         temperature=temperature,
+    #         max_tokens=max_tokens,
+    #         rounds=rounds,
+    #     ),
+    #     batched=False,
+    #     num_proc=num_proc,
+    # )
+
+    # logger.info(f"Saving outputs to {output_path}.")
+    #
+    # try:
+    #     eval_set = eval_set.remove_columns(f"references")
+    # except Exception as e:
+    #     pass
+    #
+    # with open(output_path, "w") as f:
+    #
+    #     json.dump(list(eval_set), f, indent=2)
 
 
 if __name__ == "__main__":

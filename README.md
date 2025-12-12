@@ -97,7 +97,7 @@ export OPENAI_API_KEY=<OPENAI_API_KEY>
 ```
 
 ### Run AlpacaEval 2
-
+让大模型参加 指令遵循能力 的 开卷考试”，用 800 多条真实用户指令 + GPT-4 当考官，看谁答得更符合人类偏好，最后给出 胜率排行榜
 To run AlpacaEval 2, execute the following scripts:
 
 ```
@@ -105,7 +105,7 @@ bash run_eval_alpaca_eval.sh
 ```
 
 ### Run MT-Bench
-
+它给模型发 80 组‘追问’式题目（每组 2 轮，共 160 题），覆盖写作、代码、数学、STEM 等 8 大领域，然后让 GPT-4 给每轮回答打 0–10 分，最后拿平均分衡量模型能不能持续、连贯、准确地聊下去。
 For a minimal example of MT-Bench evaluation, run:
 
 ```
