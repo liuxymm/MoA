@@ -28,20 +28,24 @@ python generate_for_alpaca_eval.py \
     --output-path="outputs" \
     --reference-models=${reference_models} \
     --rounds 3 \
-    --num-proc 4
+    --num-proc 1
 
 
-#alpaca_eval --model_outputs outputs/Qwen-72B-round-1_MoA-Lite.json --reference_outputs alpaca_eval/results/gpt4_1106_preview/model_outputs.json --output_path leaderboard
+alpaca_eval --model_outputs outputs/qwen2.5-72b-instruct/checkpoints/checkpoint_32.json --reference_outputs alpaca_eval/results/gpt4_1106_preview/model_outputs.json --output_path leaderboard
 
 
-#nohup sh run_eval_alpaca_eval.sh >> output.log 2>&1 &
+#nohup sh run_eval_alpaca_eval.sh >> output1.log 2>&1 &
 # 终止：
 # 1. 查找所有相关进程（python和sh）
-#ps aux | grep -E "generate_for_alpaca_eval|your_script.sh" | grep -v grep
+#ps aux | grep -E "generate_for_alpaca_eval|run_eval_alpaca_eval.sh" | grep -v grep
 #
 ## 2. 同时kill找到的所有进程
 #pkill -f "generate_for_alpaca_eval"
 #pkill -f "your_script.sh"  # 你的sh脚本文件名
 #
 ## 或一条命令搞定
-#pkill -f -e "generate_for_alpaca_eval\|your_script.sh"
+#pkill -f -e "generate_for_alpaca_eval|run_eval_alpaca_eval.sh"
+
+
+
+# 最终输出保存在： outputs/qwen2.5-72b-instruct/checkpoints/checkpoint_32.json

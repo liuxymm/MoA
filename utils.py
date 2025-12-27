@@ -146,7 +146,7 @@ def generate_response(model,
     else:
         client = OpenAI(api_key=reference_models[model]["api_key"], base_url=reference_models[model]["base_url"])
 
-    output = "conditions"
+    output = None
     for sleep_time in [1, 2, 4, 8, 16, 32]:
         try:
             if DEBUG:
@@ -163,11 +163,13 @@ def generate_response(model,
             # print("Model: ", model, "Response: ", response)
             break
         except Exception as e:
-            logger.error(f"生成响应失败: {e}", exc_info=True)
+            logger.exception(f"生成响应失败: {e}")
             logger.info(f"Retry in {sleep_time}s..")
-            output = f"生成时出错: {str(e)}"
             time.sleep(sleep_time)
-        output = output.strip()
+    if output is None:
+        return output
+
+    output = output.strip()
     return output
 
 
@@ -201,7 +203,7 @@ def generate_with_references(
         references=[],
         max_tokens=2048,
         temperature=0.7,
-        generate_fn=generate_together,
+        generate_fn=generate_response,
 ):
     if len(references) > 0:
         messages = inject_references_to_messages(messages, references)

@@ -17,6 +17,7 @@ from utils import (
 
 def process_fn(
     item,
+    idx,
     model,
     reference_models=[],
     temperature=0.7,
@@ -24,52 +25,65 @@ def process_fn(
     rounds=1,
 ):
 # 生成MoA output
-    messages = [{"role": "user", "content": item["instruction"]}]
+    try:
+        messages = [{"role": "user", "content": item["instruction"]}]
 
-    references = item.get("references", [])
+        references = item.get("references", [])
 
-    if len(references) == 0 and len(reference_models) > 0:
+        if len(references) == 0 and len(reference_models) > 0:
 
-        prev_references = []
+            prev_references = []
 
-        for i_round in range(rounds):
+            for i_round in range(rounds):
 
-            if DEBUG:
-                logger.info(
-                    f"Round {i_round+1}/{rounds} to collecting reference responses."
-                )
-
-            references = []
-
-            for reference_model in reference_models:
-
-                reference = generate_with_references(
-                    model=reference_model,
-                    messages=messages,
-                    references=prev_references,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    generate_fn=generate_response,
-                )
-
-                if reference is not None:
-
-                    references.append(reference)
-
-            if i_round < rounds - 1:
-
-                prev_references = references
+                if DEBUG:
+                    logger.info(
+                        f"Round {i_round+1}/{rounds} to collecting reference responses."
+                    )
 
                 references = []
 
-    output = generate_with_references(
-        model=model,  # aggregator
-        messages=messages, # prompt for aggregator
-        references=references, # other reference model's output
-        generate_fn=generate_response,
-    )
-    # 这里移除了model后缀“-together”
-    return {"output": output, "generator": model}
+                for reference_model in reference_models:
+                    try:
+                        reference = generate_with_references(
+                            model=reference_model,
+                            messages=messages,
+                            references=prev_references,
+                            temperature=temperature,
+                            max_tokens=max_tokens,
+                            generate_fn=generate_response,
+                        )
+
+                        references.append(reference)
+                    except Exception as e:
+                        logger.exception(f"Reference model {reference_model} failed: {e}")
+                        references.append("")  # 或 "[ERROR]"
+
+                if i_round < rounds - 1:
+
+                    prev_references = references
+
+                    references = []
+        try:
+            output = generate_with_references(
+                model=model,  # aggregator
+                messages=messages, # prompt for aggregator
+                references=references, # other reference model's output
+                generate_fn=generate_response,
+            )
+        except Exception as e:
+            logger.exception(f"Aggregator model {model} failed: {e}")
+            output = f"Aggregator model {model} failed: {e}"
+
+        # 这里移除了model后缀“-together”
+        return {"output": output, "generator": model}
+    except Exception as e:
+        # 顶层兜底：确保不 crash
+        logger.exception(f"Sample idx={idx} failed: {e}")
+        return {
+            "output": f"[FATAL_ERROR] {str(e)}",
+            "generator": model
+        }
 
 
 def main(
@@ -81,7 +95,7 @@ def main(
     max_tokens: int = 2048,
     rounds: int = 1,
     num_proc: int = 16,
-    batch_size: int = 50,
+    batch_size: int = 25,
 ):
 
     if reference_paths is None:
@@ -97,7 +111,7 @@ def main(
     eval_set = (datasets.load_dataset(
         "tatsu-lab/alpaca_eval", "alpaca_eval_gpt4_baseline", trust_remote_code=True
     )["eval"])
-    # .select(range(1))
+    # .select(range(300:))
     # 这里只保留前5个样本，方便调试
     eval_set = eval_set.remove_columns(["output", "generator"])
 
@@ -148,16 +162,18 @@ def main(
                     max_tokens=max_tokens,
                     rounds=rounds,
                 ),
+                with_indices=True,
                 batched=False,
                 num_proc=num_proc,
             )
             all_results.extend(processed_batch)
-
-            ckpath = save_checkpoint_json(all_results, Path(output_path)/model/"checkpoints", i//batch_size)
-            logger.info(f"Batch {i//batch_size} saved to {ckpath}.")
+            ckdir = Path(output_path)/model/"checkpoints"
+            logger.info(f"Batch {i // batch_size} saved to {ckdir}.")
+            ckpath = save_checkpoint_json(all_results, ckdir, i//batch_size)
+            logger.info(f"Success for Batch {i//batch_size} saving to {ckpath}.")
         except Exception as e:
-            logger.error(f"Batch {i//batch_size}, batch_indices: {batch_indices}, failed: {e}")
-            print(f"Skipping batch {i // batch_size}, batch_indices: {batch_indices}, continuing...")
+            logger.exception(f"Batch {i//batch_size}, batch_indices: {batch_indices}, failed: {str(e)}")
+            logger.warning(f"Skipping batch {i // batch_size}, batch_indices: {batch_indices}, continuing...")
             continue
 
 
